@@ -1,6 +1,7 @@
 from flask import Flask, request
 import os
 import requests
+from collections import defaultdict
 
 app = Flask(__name__)
 
@@ -8,10 +9,24 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "MySuperSecretToken")
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 HF_API_KEY = os.environ.get("HF_API_KEY")
 
-def get_ai_reply(user_message):
+# Store conversation history per user
+conversation_history = defaultdict(list)
+
+def get_ai_reply(user_id, user_message):
     API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {"inputs": user_message}
+
+    # Append user's message to history
+    conversation_history[user_id].append(f"User: {user_message}")
+
+    # Keep only last 5 exchanges
+    if len(conversation_history[user_id]) > 10:
+        conversation_history[user_id] = conversation_history[user_id][-10:]
+
+    # Combine conversation into one string
+    prompt = "\n".join(conversation_history[user_id])
+
+    payload = {"inputs": prompt}
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
@@ -19,7 +34,12 @@ def get_ai_reply(user_message):
         print(f"🤖 AI Response Raw: {data}")
 
         if isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
-            return data[0]["generated_text"]
+            ai_text = data[0]["generated_text"]
+
+            # Append AI reply to history
+            conversation_history[user_id].append(f"Bot: {ai_text}")
+
+            return ai_text
         else:
             return "Sorry, I couldn't think of a reply."
     except Exception as e:
@@ -28,7 +48,7 @@ def get_ai_reply(user_message):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Facebook Chatbot with AI is running!", 200
+    return "Facebook Chatbot with AI and memory is running!", 200
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
@@ -54,7 +74,7 @@ def webhook():
                         user_message = event["message"].get("text", "")
 
                         if user_message:
-                            ai_reply = get_ai_reply(user_message)
+                            ai_reply = get_ai_reply(sender_id, user_message)
                             send_message(sender_id, ai_reply)
                         else:
                             send_message(sender_id, "Thanks for sending me something!")
