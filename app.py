@@ -13,18 +13,20 @@ HF_API_KEY = os.environ.get("HF_API_KEY")
 conversation_history = defaultdict(list)
 
 def get_ai_reply(user_id, user_message):
-    API_URL = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
+    # Updated to use a publicly hosted model on Hugging Face
+    API_URL = "https://api-inference.huggingface.co/models/gpt2"
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
 
     # Append user's message to history
-    conversation_history[user_id].append(f"User: {user_message}")
+    conversation_history[user_id].append(user_message)
 
-    # Keep only last 5 exchanges (10 messages total)
+    # Keep only last 5 exchanges (10 messages)
     if len(conversation_history[user_id]) > 10:
         conversation_history[user_id] = conversation_history[user_id][-10:]
 
-    # Combine conversation into one string
-    prompt = "\n".join(conversation_history[user_id])
+    # Combine conversation into one string (for GPT-2, we just send last message)
+    # GPT-2 doesn't support dialogue history by default in the API, so just send current message
+    prompt = user_message
 
     payload = {"inputs": prompt}
 
@@ -43,11 +45,12 @@ def get_ai_reply(user_id, user_message):
 
         data = response.json()
 
+        # GPT-2 returns a list of generated sequences in 'generated_text'
         if isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
             ai_text = data[0]["generated_text"]
 
             # Append AI reply to history
-            conversation_history[user_id].append(f"Bot: {ai_text}")
+            conversation_history[user_id].append(ai_text)
 
             return ai_text
         else:
