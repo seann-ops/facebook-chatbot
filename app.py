@@ -7,56 +7,64 @@ app = Flask(__name__)
 
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "MySuperSecretToken")
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
-HF_API_KEY = os.environ.get("HF_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# Store conversation history per user (optional, can be used for context extension)
+# Store conversation history per user: user and bot messages alternate
 conversation_history = defaultdict(list)
 
 def get_ai_reply(user_id, user_message):
-    API_URL = "https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill"
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-    # Append user message to history (optional)
-    conversation_history[user_id].append(user_message)
-    # Keep only last 5 messages to limit size
-    if len(conversation_history[user_id]) > 5:
-        conversation_history[user_id] = conversation_history[user_id][-5:]
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
 
-    # For BlenderBot API, just send latest user message
-    payload = {"inputs": user_message}
+    system_prompt = "You are a helpful AI assistant."
+
+    messages = [{"role": "system", "content": system_prompt}]
+
+    # Append previous conversation from memory
+    for i, msg in enumerate(conversation_history[user_id]):
+        role = "user" if i % 2 == 0 else "assistant"
+        messages.append({"role": role, "content": msg})
+
+    # Append current user message
+    messages.append({"role": "user", "content": user_message})
+
+    payload = {
+        "model": "DeepSeek: DeepSeek V3 0324 (free)",
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 150
+    }
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
-        print(f"HF API status code: {response.status_code}")
-        print(f"HF API raw response text: {response.text}")
-
         if response.status_code != 200:
-            print(f"Error: HF API returned status code {response.status_code}")
+            print(f"OpenRouter API error: {response.status_code} - {response.text}")
             return "Sorry, I couldn't get a reply from AI service."
 
         data = response.json()
+        ai_text = data["choices"][0]["message"]["content"]
 
-        # Handle response format variations
-        if isinstance(data, dict) and "generated_text" in data:
-            ai_text = data["generated_text"]
-        elif isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
-            ai_text = data[0]["generated_text"]
-        else:
-            print("Unexpected HF API response structure:", data)
-            return "Sorry, I couldn't think of a reply."
+        # Update conversation history
+        conversation_history[user_id].append(user_message)  # user message
+        conversation_history[user_id].append(ai_text)       # bot reply
 
-        # Append AI reply to history (optional)
-        conversation_history[user_id].append(ai_text)
+        # Keep last 10 messages max (5 user-bot pairs)
+        if len(conversation_history[user_id]) > 10:
+            conversation_history[user_id] = conversation_history[user_id][-10:]
 
         return ai_text
 
     except Exception as e:
-        print(f"AI API error: {e}")
+        print(f"OpenRouter API error: {e}")
         return "Sorry, something went wrong."
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Facebook Chatbot with BlenderBot AI running!", 200
+    return "Facebook Chatbot with AI and memory is running!", 200
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
