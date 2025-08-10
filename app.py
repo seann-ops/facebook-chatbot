@@ -19,7 +19,7 @@ def get_ai_reply(user_id, user_message):
     # Append user's message to history
     conversation_history[user_id].append(f"User: {user_message}")
 
-    # Keep only last 5 exchanges
+    # Keep only last 5 exchanges (10 messages total)
     if len(conversation_history[user_id]) > 10:
         conversation_history[user_id] = conversation_history[user_id][-10:]
 
@@ -30,8 +30,18 @@ def get_ai_reply(user_id, user_message):
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
+        print(f"HF API status code: {response.status_code}")
+        print(f"HF API raw response text: {response.text}")
+
+        if response.status_code != 200:
+            print(f"Error: HF API returned status code {response.status_code}")
+            return "Sorry, I couldn't get a reply from AI service."
+
+        if not response.text:
+            print("Error: HF API returned empty response")
+            return "Sorry, I couldn't get a reply from AI service."
+
         data = response.json()
-        print(f"🤖 AI Response Raw: {data}")
 
         if isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
             ai_text = data[0]["generated_text"]
@@ -41,7 +51,9 @@ def get_ai_reply(user_id, user_message):
 
             return ai_text
         else:
+            print("Unexpected HF API response structure:", data)
             return "Sorry, I couldn't think of a reply."
+
     except Exception as e:
         print(f"AI API error: {e}")
         return "Sorry, something went wrong."
