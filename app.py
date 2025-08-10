@@ -9,26 +9,21 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "MySuperSecretToken")
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 HF_API_KEY = os.environ.get("HF_API_KEY")
 
-# Store conversation history per user
+# Store conversation history per user (optional, can be used for context extension)
 conversation_history = defaultdict(list)
 
 def get_ai_reply(user_id, user_message):
-    # Updated to use a publicly hosted model on Hugging Face
-    API_URL = "https://api-inference.huggingface.co/models/gpt2"
+    API_URL = "https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill"
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
 
-    # Append user's message to history
+    # Append user message to history (optional)
     conversation_history[user_id].append(user_message)
+    # Keep only last 5 messages to limit size
+    if len(conversation_history[user_id]) > 5:
+        conversation_history[user_id] = conversation_history[user_id][-5:]
 
-    # Keep only last 5 exchanges (10 messages)
-    if len(conversation_history[user_id]) > 10:
-        conversation_history[user_id] = conversation_history[user_id][-10:]
-
-    # Combine conversation into one string (for GPT-2, we just send last message)
-    # GPT-2 doesn't support dialogue history by default in the API, so just send current message
-    prompt = user_message
-
-    payload = {"inputs": prompt}
+    # For BlenderBot API, just send latest user message
+    payload = {"inputs": user_message}
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
@@ -39,23 +34,21 @@ def get_ai_reply(user_id, user_message):
             print(f"Error: HF API returned status code {response.status_code}")
             return "Sorry, I couldn't get a reply from AI service."
 
-        if not response.text:
-            print("Error: HF API returned empty response")
-            return "Sorry, I couldn't get a reply from AI service."
-
         data = response.json()
 
-        # GPT-2 returns a list of generated sequences in 'generated_text'
-        if isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
+        # Handle response format variations
+        if isinstance(data, dict) and "generated_text" in data:
+            ai_text = data["generated_text"]
+        elif isinstance(data, list) and len(data) > 0 and "generated_text" in data[0]:
             ai_text = data[0]["generated_text"]
-
-            # Append AI reply to history
-            conversation_history[user_id].append(ai_text)
-
-            return ai_text
         else:
             print("Unexpected HF API response structure:", data)
             return "Sorry, I couldn't think of a reply."
+
+        # Append AI reply to history (optional)
+        conversation_history[user_id].append(ai_text)
+
+        return ai_text
 
     except Exception as e:
         print(f"AI API error: {e}")
@@ -63,7 +56,7 @@ def get_ai_reply(user_id, user_message):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Facebook Chatbot with AI and memory is running!", 200
+    return "Facebook Chatbot with BlenderBot AI running!", 200
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
