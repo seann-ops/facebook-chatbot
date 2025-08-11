@@ -9,57 +9,61 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "MySuperSecretToken")
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# Store conversation history per user: user and bot messages alternate
+# Store conversation history per user: alternating user and bot messages
 conversation_history = defaultdict(list)
 
 def get_ai_reply(user_id, user_message):
-    API_URL = "https://openrouter.ai/api/v1/chat/completions"
-
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        # Optional headers, uncomment and set if you want rankings on openrouter.ai
+        # "HTTP-Referer": "https://yourdomain.com",
+        # "X-Title": "YourSiteName",
     }
 
-    system_prompt = "You are a helpful AI assistant."
+    # Prepare messages with system prompt + memory + current user input
+    system_prompt = "You are a helpful assistant."
 
     messages = [{"role": "system", "content": system_prompt}]
 
-    # Append previous conversation from memory
+    # Add conversation history (user and bot alternate)
     for i, msg in enumerate(conversation_history[user_id]):
         role = "user" if i % 2 == 0 else "assistant"
         messages.append({"role": role, "content": msg})
 
-    # Append current user message
+    # Add the latest user message
     messages.append({"role": "user", "content": user_message})
 
     payload = {
-        "model": "DeepSeek: DeepSeek V3 0324 (free)",
+        "model": "deepseek/deepseek-chat-v3-0324:free",
         "messages": messages,
         "temperature": 0.7,
-        "max_tokens": 150
+        "max_tokens": 150,
     }
 
     try:
-        response = requests.post(API_URL, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload)
+
         if response.status_code != 200:
-            print(f"OpenRouter API error: {response.status_code} - {response.text}")
+            print(f"OpenRouter API error {response.status_code}: {response.text}")
             return "Sorry, I couldn't get a reply from AI service."
 
         data = response.json()
         ai_text = data["choices"][0]["message"]["content"]
 
-        # Update conversation history
+        # Update conversation memory
         conversation_history[user_id].append(user_message)  # user message
         conversation_history[user_id].append(ai_text)       # bot reply
 
-        # Keep last 10 messages max (5 user-bot pairs)
+        # Limit conversation history length (last 10 messages, i.e. 5 pairs)
         if len(conversation_history[user_id]) > 10:
             conversation_history[user_id] = conversation_history[user_id][-10:]
 
         return ai_text
 
     except Exception as e:
-        print(f"OpenRouter API error: {e}")
+        print(f"Exception in OpenRouter API call: {e}")
         return "Sorry, something went wrong."
 
 @app.route("/", methods=["GET"])
