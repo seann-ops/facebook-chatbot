@@ -2,7 +2,6 @@ from flask import Flask, request
 import os
 import requests
 from collections import defaultdict
-import json
 
 # ------------------------
 # App Initialization
@@ -49,12 +48,12 @@ def send_message(recipient_id, message_text):
         print(f"[❌ Exception] Sending FB message failed: {e}")
 
 # ------------------------
-# AI Reply Function (Streaming)
+# AI Reply Function (non-streaming for stability)
 # ------------------------
 def get_ai_reply(user_id, user_message):
     """
     Sends conversation history + latest user message to OpenRouter API
-    and streams the AI's reply token-by-token to Facebook Messenger.
+    and returns the AI's reply.
     """
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -73,52 +72,41 @@ def get_ai_reply(user_id, user_message):
     messages.append({"role": "user", "content": user_message})
 
     payload = {
-        "model": "deepseek/deepseek-chat-v3-0324:free",
+        "model": "openchat/openchat-7b:free",  # stable free model
         "messages": messages,
         "temperature": 0.7,
-        "max_tokens": 150,
-        "stream": True
+        "max_tokens": 200,
+        "stream": False
     }
 
     try:
-        with requests.post(url, headers=headers, json=payload, stream=True) as r:
-            if r.status_code != 200:
-                print(f"[❌ OpenRouter Error] {r.status_code}: {r.text}")
-                send_message(user_id, "Sorry, I couldn't get a reply from AI service.")
-                return
+        response = requests.post(url, headers=headers, json=payload)
+        if response.status_code != 200:
+            print(f"[❌ OpenRouter Error] {response.status_code}: {response.text}")
+            return "Sorry, I couldn't get a reply from AI service."
 
-            partial_reply = ""
-            for line in r.iter_lines():
-                if line:
-                    try:
-                        # Each streamed line starts with 'data: '
-                        if line.startswith(b"data: "):
-                            line_data = line[6:].decode("utf-8")
-                            if line_data.strip() == "[DONE]":
-                                break
-                            event = json.loads(line_data)
-                            delta = event["choices"][0]["delta"].get("content", "")
-                            if delta:
-                                partial_reply += delta
-                                send_message(user_id, partial_reply)
-                    except Exception as e:
-                        print(f"[⚠️ Stream Error] {e}")
+        data = response.json()
+        print(f"[AI Raw Response] {data}")
 
-            # Save to history after stream ends
-            conversation_history[user_id].append(user_message)
-            conversation_history[user_id].append(partial_reply)
-            conversation_history[user_id] = conversation_history[user_id][-10:]
+        ai_text = data["choices"][0]["message"]["content"]
+
+        # Save history (last 10 turns)
+        conversation_history[user_id].append(user_message)
+        conversation_history[user_id].append(ai_text)
+        conversation_history[user_id] = conversation_history[user_id][-10:]
+
+        return ai_text
 
     except Exception as e:
-        print(f"[❌ Exception] OpenRouter API streaming failed: {e}")
-        send_message(user_id, "Sorry, something went wrong.")
+        print(f"[❌ Exception] OpenRouter API failed: {e}")
+        return "Sorry, something went wrong."
 
 # ------------------------
 # Routes
 # ------------------------
 @app.route("/", methods=["GET"])
 def home():
-    return "Facebook Chatbot with AI (Streaming) is running!", 200
+    return "Facebook Chatbot with AI is running!", 200
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
@@ -144,7 +132,8 @@ def webhook():
                         user_message = event["message"].get("text", "")
 
                         if user_message:
-                            get_ai_reply(sender_id, user_message)
+                            ai_reply = get_ai_reply(sender_id, user_message)
+                            send_message(sender_id, ai_reply)
                         else:
                             send_message(sender_id, "Thanks for sending me something!")
         return "EVENT_RECEIVED", 200
